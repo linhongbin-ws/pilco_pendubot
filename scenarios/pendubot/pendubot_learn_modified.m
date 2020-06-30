@@ -50,7 +50,8 @@ trainDynModel;
 mu0Sim(odei,:) = mu0; S0Sim(odei,odei) = S0;
 mu0Sim = mu0Sim(dyno); S0Sim = S0Sim(dyno,dyno);
 learnPolicy;
-
+policy = rmfield(policy,'fcn')
+save('pilco_load_param.mat', 'policy')
 % 
 % % 3. Controlled learning (N iterations)
 % for j = 1:N
