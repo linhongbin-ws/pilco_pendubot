@@ -2,26 +2,22 @@ classdef pendubot_controller
     properties
         motor1
         motor2
-        taskMeasure
+        taskControl
         taskPlotter
         taskPrint
-        taskTorqueCommand
         timeStart
         timeNow
         gearRatio1 = 1/5
         gearRatio2 = 1
-        dT_measure = 0.001
-        dT_torqueCommand = 0.1
+        dT_control = 0.01
         dT_print = 0.1
         dT_plotter = 0.1
         dq1_filRatio = 0.9
         dq2_filRatio = 0.9
         FigID = 1
         fixPlotWindowTime = 10
-        isTaskMeasure = false
         isTaskPlotter = false
         isTaskPrinter = false
-        isTaskTorqueCommand = false
         maxTor = 0.4
     end
     
@@ -34,12 +30,41 @@ classdef pendubot_controller
             obj.timeStart = mx_sleep(0);
             obj.timeNow = obj.timeStart;
             
-            global plot_Cell origin_absPos1 origin_absPos2 isInitPlot
+            global plot_Cell origin_absPos1 origin_absPos2 isInitPlot desTor1
 
             plot_Cell = {[],[],[],[],[]};
             origin_absPos1 = 0;
             origin_absPos2 = 0;
             isInitPlot = true;
+            desTor1 = 0;
+        end
+        function obj = start(obj)
+            if obj.isTaskPrinter
+                obj.taskPrint =  mx_task(@()obj.task_printer, obj.dT_print);
+            end
+            if obj.isTaskPlotter
+                obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
+            end
+            obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control);
+            
+            
+            
+            obj.motor1.open();
+            obj.motor2.open();
+            
+
+            obj.set_measureOrigin();
+  
+            obj.timeStart = mx_sleep(0);
+            obj.timeNow = obj.timeStart;
+            
+            
+        end
+      
+        
+        function stop(obj)
+            obj.motor1.close()
+            obj.motor2.close()
         end
         
         function obj = run(obj)
@@ -48,18 +73,16 @@ classdef pendubot_controller
             
             obj.timeNow = mx_sleep(0.00001); % sleeps thread for 10us
             
-            if obj.isTaskMeasure
-                obj.taskMeasure.run(obj.timeNow);
-            end
+            
             if obj.isTaskPrinter
                 obj.taskPrint.run(obj.timeNow);
             end
             if obj.isTaskPlotter
                 obj.taskPlotter.run(obj.timeNow);
             end
-            if obj.isTaskTorqueCommand
-                obj.taskTorqueCommand.run(obj.timeNow);
-            end
+         
+            obj.taskControl.run(obj.timeNow);
+            
             
             elapseTime = obj.timeNow - obj.timeStart;
         end
@@ -79,19 +102,6 @@ classdef pendubot_controller
             end
         end
         
-        function obj = setTaskMeasure(obj, isTaskMeasure)
-            obj.isTaskMeasure = isTaskMeasure;
-            if isTaskMeasure
-                obj.taskMeasure =  mx_task(@()obj.task_measurement, obj.dT_measure);
-            end
-        end
-        
-        function obj = setTaskTorqueCommand(obj, isTaskTorqueCommand)
-            obj.isTaskTorqueCommand = isTaskTorqueCommand;
-            if isTaskTorqueCommand
-                obj.taskTorqueCommand =  mx_task(@()obj.task_torqueCommand, obj.dT_torqueCommand);
-            end
-        end
         
         function set_measureOrigin(obj)
             global absPos1 absPos2 origin_absPos1 origin_absPos2
@@ -102,10 +112,7 @@ classdef pendubot_controller
             origin_absPos2 = absPos2;
         end
         
-        
-        function task_measurement(obj)
-            obj.measurement();
-        end
+   
         
         function obj = firstMeasure(obj)
             global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil
@@ -151,12 +158,14 @@ classdef pendubot_controller
             q1 = (relPos1 +180) / 180 * pi;
             q2 = (q1 + relPos2) / 180 * pi;
             
-            dq1 = (q1 - prev_q1) / obj.dT_measure;
-            dq2 = (q2 - prev_q2) / obj.dT_measure;
+            dq1 = (q1 - prev_q1) / obj.dT_control;
+            dq2 = (q2 - prev_q2) / obj.dT_control;
             
             dq1_fil = obj.dq1_filRatio *  dq1_fil + (1-obj.dq1_filRatio) * dq1;
             dq2_fil = obj.dq2_filRatio *  dq2_fil + (1-obj.dq2_filRatio) * dq2;
         end
+        
+
         
         function obj = measurement(obj)
             global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil
@@ -194,49 +203,16 @@ classdef pendubot_controller
             q1 = (relPos1 +180) / 180 * pi;
             q2 = (q1 + relPos2) / 180 * pi;
             
-            dq1 = (q1 - prev_q1) / obj.dT_measure;
-            dq2 = (q2 - prev_q2) / obj.dT_measure;
+            dq1 = (q1 - prev_q1) / obj.dT_control;
+            dq2 = (q2 - prev_q2) / obj.dT_control;
             
             dq1_fil = obj.dq1_filRatio *  dq1_fil + (1-obj.dq1_filRatio) * dq1;
             dq2_fil = obj.dq2_filRatio *  dq2_fil + (1-obj.dq2_filRatio) * dq2;
         end
         
-        function obj = start(obj)
-            if obj.isTaskMeasure
-                obj.taskMeasure =  mx_task(@()obj.task_measurement, obj.dT_measure);
-            end
-            if obj.isTaskPrinter
-                obj.taskPrint =  mx_task(@()obj.task_printer, obj.dT_print);
-            end
-            if obj.isTaskPlotter
-                obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
-            end
-             if obj.isTaskTorqueCommand
-                obj.taskTorqueCommand =  mx_task(@()obj.task_torqueCommand, obj.dT_torqueCommand);
-            end        
-            
-            
-            
-            
-            obj.motor1.open();
-            obj.motor2.open();
-            
-            if obj.isTaskMeasure
-                obj.set_measureOrigin();
-            end
-            obj.timeStart = mx_sleep(0);
-            obj.timeNow = obj.timeStart;
-            
-            
-        end
-      
+
         
-        function stop(obj)
-            obj.motor1.close()
-            obj.motor2.close()
-        end
-        
-        function task_torqueCommand(obj)
+        function send_torque(obj)
             global desTor1                  
             if abs(desTor1) >= obj.maxTor
                 obj.motor1.send_current(sign(desTor1) * obj.maxTor);
@@ -286,6 +262,12 @@ classdef pendubot_controller
                 drawnow
             end
         end
+        
+        function obj = task_control(obj)
+            obj.measurement();
+            obj.send_torque();
+        end
+    
         
         function obj = delete_controller(obj)
             obj.motor1.delete();

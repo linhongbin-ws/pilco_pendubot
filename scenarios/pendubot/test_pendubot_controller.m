@@ -1,7 +1,6 @@
 %%
 clear all; clc;
 controller = pendubot_controller();
-controller = controller.setTaskMeasure(true);
 controller = controller.setTaskPlotter(true);
 controller = controller.setTaskPrinter(false);
 duration = 20;
