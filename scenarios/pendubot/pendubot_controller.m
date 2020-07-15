@@ -5,16 +5,24 @@ classdef pendubot_controller
         taskMeasure
         taskPlotter
         taskPrint
+        taskTorqueCommand
         timeStart
         timeNow
         gearRatio1 = 1/5
         gearRatio2 = 1
         dT_measure = 0.001
+        dT_torqueCommand = 0.1
         dT_print = 0.1
         dT_plotter = 0.1
         dq1_filRatio = 0.9
         dq2_filRatio = 0.9
         FigID = 1
+        fixPlotWindowTime = 10
+        isTaskMeasure = false
+        isTaskPlotter = false
+        isTaskPrinter = false
+        isTaskTorqueCommand = false
+        maxTor = 0.4
     end
     
     methods
@@ -26,25 +34,70 @@ classdef pendubot_controller
             obj.timeStart = mx_sleep(0);
             obj.timeNow = obj.timeStart;
             
-            global absC1 absC2 prevPos1 prevPos2 pos1 pos2  plot_Cell origin_absPos1 origin_absPos2 q1 q2
+            global plot_Cell origin_absPos1 origin_absPos2 isInitPlot
 
             plot_Cell = {[],[],[],[],[]};
-            origin_absPos1 = 0
-            origin_absPos2 = 0
+            origin_absPos1 = 0;
+            origin_absPos2 = 0;
+            isInitPlot = true;
         end
         
         function obj = run(obj)
+            
             global elapseTime 
+            
             obj.timeNow = mx_sleep(0.00001); % sleeps thread for 10us
-            obj.taskMeasure.run(obj.timeNow);
-            obj.taskPrint.run(obj.timeNow);
-            obj.taskPlotter.run(obj.timeNow);
+            
+            if obj.isTaskMeasure
+                obj.taskMeasure.run(obj.timeNow);
+            end
+            if obj.isTaskPrinter
+                obj.taskPrint.run(obj.timeNow);
+            end
+            if obj.isTaskPlotter
+                obj.taskPlotter.run(obj.timeNow);
+            end
+            if obj.isTaskTorqueCommand
+                obj.taskTorqueCommand.run(obj.timeNow);
+            end
+            
             elapseTime = obj.timeNow - obj.timeStart;
+        end
+        
+        function obj = setTaskPrinter(obj, isTaskPrinter)
+            obj.isTaskPrinter = isTaskPrinter;
+            if(isTaskPrinter)
+                obj.taskPrint =  mx_task(@()obj.task_printer, obj.dT_print);
+            end
+   
+        end
+        
+        function obj = setTaskPlotter(obj, isTaskPlotter)
+            obj.isTaskPlotter = isTaskPlotter;
+            if isTaskPlotter
+                obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
+            end
+        end
+        
+        function obj = setTaskMeasure(obj, isTaskMeasure)
+            obj.isTaskMeasure = isTaskMeasure;
+            if isTaskMeasure
+                obj.taskMeasure =  mx_task(@()obj.task_measurement, obj.dT_measure);
+            end
+        end
+        
+        function obj = setTaskTorqueCommand(obj, isTaskTorqueCommand)
+            obj.isTaskTorqueCommand = isTaskTorqueCommand;
+            if isTaskTorqueCommand
+                obj.taskTorqueCommand =  mx_task(@()obj.task_torqueCommand, obj.dT_torqueCommand);
+            end
         end
         
         function set_measureOrigin(obj)
             global absPos1 absPos2 origin_absPos1 origin_absPos2
-            obj.measurement();
+            for i = 1:5
+                obj.firstMeasure();
+            end
             origin_absPos1 = absPos1;
             origin_absPos2 = absPos2;
         end
@@ -66,6 +119,8 @@ classdef pendubot_controller
             prevPos2 = pos2;
             prev_q1 = q1;
             prev_q2 = q2;
+            dq1_fil = 0;
+            dq2_fil  = 0;
             
             angThres = 190;
 
@@ -147,22 +202,51 @@ classdef pendubot_controller
         end
         
         function obj = start(obj)
-            obj.taskMeasure =  mx_task(@()obj.task_measurement, obj.dT_measure);
-            obj.taskPrint =  mx_task(@()obj.task_printer, obj.dT_print);
-            obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
+            if obj.isTaskMeasure
+                obj.taskMeasure =  mx_task(@()obj.task_measurement, obj.dT_measure);
+            end
+            if obj.isTaskPrinter
+                obj.taskPrint =  mx_task(@()obj.task_printer, obj.dT_print);
+            end
+            if obj.isTaskPlotter
+                obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
+            end
+             if obj.isTaskTorqueCommand
+                obj.taskTorqueCommand =  mx_task(@()obj.task_torqueCommand, obj.dT_torqueCommand);
+            end        
+            
+            
+            
+            
             obj.motor1.open();
             obj.motor2.open();
+            
+            if obj.isTaskMeasure
+                obj.set_measureOrigin();
+            end
             obj.timeStart = mx_sleep(0);
             obj.timeNow = obj.timeStart;
             
             
         end
+      
         
         function stop(obj)
             obj.motor1.close()
             obj.motor2.close()
         end
         
+        function task_torqueCommand(obj)
+            global desTor1                  
+            if abs(desTor1) >= obj.maxTor
+                obj.motor1.send_current(sign(desTor1) * obj.maxTor);
+            else
+                obj.motor1.send_current(desTor1); % sends current command
+            end
+   
+        end
+  
+            
         function task_printer(obj)
              global relPos1 relPos2 absPos1 absPos2  q1 q2 
 %             fprintf("pos1: %.4f deg \t pos2: %.4f deg\n", absPos1, absPos2); 
@@ -172,22 +256,35 @@ classdef pendubot_controller
         end
         
         function task_plotter(obj)
-            global q1 q2 dq1_fil dq2_fil plot_Cell elapseTime
+            global q1 q2 dq1_fil dq2_fil plot_Cell elapseTime isInitPlot
             
-            plot_Cell{1} = [plot_Cell{1}, q1];
-            plot_Cell{2} = [plot_Cell{2}, q2];
-            plot_Cell{3} = [plot_Cell{3}, dq1_fil];
-            plot_Cell{4} = [plot_Cell{4}, dq2_fil];
-            plot_Cell{5} = [plot_Cell{5}, elapseTime];
-            legendList = ['q1', 'q2', 'Filtered dq1', 'Filtered dq2'];
-            
-            figure(obj.FigID);
-            
-            for i = 1:4
-                subplot(2,2,i)
-                plot(plot_Cell{5},plot_Cell{i},'DisplayName',legendList(i));
+            if ~isempty(q1) && ~isempty(q2) && ~isempty(dq1_fil) && ~isempty(dq2_fil) && ~isempty(elapseTime) 
+                plot_Cell{1} = [plot_Cell{1}, q1];
+                plot_Cell{2} = [plot_Cell{2}, q2];
+                plot_Cell{3} = [plot_Cell{3}, dq1_fil];
+                plot_Cell{4} = [plot_Cell{4}, dq2_fil];
+                plot_Cell{5} = [plot_Cell{5}, elapseTime];
+                legendList = ['q1', 'q2', 'Filtered dq1', 'Filtered dq2'];
+
+                figure(obj.FigID);
+
+                for i = 1:4
+                    ax = subplot(2,2,i);
+                    if size(plot_Cell{5},2)<=(obj.fixPlotWindowTime/obj.dT_plotter)
+                        plot(ax, plot_Cell{5},plot_Cell{i});
+                    else
+                        plot(ax, plot_Cell{5}(end - obj.fixPlotWindowTime/obj.dT_plotter:end), plot_Cell{i}(end - obj.fixPlotWindowTime/obj.dT_plotter:end));
+                    end
+%                   legend(legendList(i))
+%                     if isInitPlot
+%                         hold(ax, 'on')
+%                         legend(legendList(i))
+%                         hold(ax, 'off')
+%                         isInitPlot = false
+%                     end
+                end
+                drawnow
             end
-            drawnow
         end
         
         function obj = delete_controller(obj)
