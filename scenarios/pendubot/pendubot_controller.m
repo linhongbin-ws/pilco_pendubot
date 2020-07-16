@@ -1,24 +1,52 @@
 classdef pendubot_controller
     properties
+        % basic param
         motor1
         motor2
-        taskControl
-        taskPlotter
-        taskPrint
         timeStart
         timeNow
-        gearRatio1 = 1/5
-        gearRatio2 = 1
+        
+        %task param
         dT_control = 0.01
         dT_print = 0.1
         dT_plotter = 0.1
-        dq1_filRatio = 0.9
-        dq2_filRatio = 0.9
-        FigID = 1
-        fixPlotWindowTime = 10
+        dT_PID = 0.01
+        dT_recorder = 0.01
+        
+        
+        taskControl
+        taskPlotter
+        taskPrint
+        taskPID
+        taskRecorder
+   
+        
         isTaskPlotter = false
         isTaskPrinter = false
-        maxTor = 0.4
+        isTaskPID = false
+        isTaskRecorder = true
+        
+        % plot param
+        FigID = 1
+        fixPlotWindowTime = 15
+        
+        
+        % mearsure param
+        gearRatio1 = 1
+        gearRatio2 = 1
+        dq1_filRatio = 0.9
+        dq2_filRatio = 0.9
+
+        
+        % control param
+        PID_p = 0.5
+        PID_d = 0
+        maxTor1 = 1
+        
+        % record param
+        legendList = ['q1', 'q2', 'Filtered dq1', 'Filtered dq2', 'tau'];
+        maxRecordBuffer = 10000
+        
     end
     
     methods
@@ -30,29 +58,38 @@ classdef pendubot_controller
             obj.timeStart = mx_sleep(0);
             obj.timeNow = obj.timeStart;
             
-            global plot_Cell origin_absPos1 origin_absPos2 isInitPlot desTor1
+            global RecordCell origin_absPos1 origin_absPos2 isInitPlot desTor1 
 
-            plot_Cell = {[],[],[],[],[]};
+            RecordCell = cell(1, 6);
             origin_absPos1 = 0;
             origin_absPos2 = 0;
             isInitPlot = true;
             desTor1 = 0;
         end
         function obj = start(obj)
+            
+            % basic task that must run
+            obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control); 
+            
+            % alternative tasks
             if obj.isTaskPrinter
                 obj.taskPrint =  mx_task(@()obj.task_printer, obj.dT_print);
             end
             if obj.isTaskPlotter
                 obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
             end
-            obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control);
-            
-            
-            
+            if obj.isTaskPID
+                obj.taskPID =  mx_task(@()obj.task_PID, obj.dT_PID);
+            end
+            if obj.isTaskRecorder
+                obj.taskRecorder = mx_task(@()obj.task_recorder, obj.dT_recorder);
+            end
+
+            % start communication
             obj.motor1.open();
             obj.motor2.open();
             
-
+            % set current joint position as origin
             obj.set_measureOrigin();
   
             obj.timeStart = mx_sleep(0);
@@ -63,6 +100,7 @@ classdef pendubot_controller
       
         
         function stop(obj)
+            obj.set_zeroTor()
             obj.motor1.close()
             obj.motor2.close()
         end
@@ -70,18 +108,26 @@ classdef pendubot_controller
         function obj = run(obj)
             
             global elapseTime 
-            
             obj.timeNow = mx_sleep(0.00001); % sleeps thread for 10us
             
+            % basic task that must run
+            obj.taskControl.run(obj.timeNow);
             
+            % alternative tasks
             if obj.isTaskPrinter
                 obj.taskPrint.run(obj.timeNow);
             end
             if obj.isTaskPlotter
                 obj.taskPlotter.run(obj.timeNow);
             end
+            if obj.isTaskPID
+                obj.taskPID.run(obj.timeNow);
+            end
+            if obj.isTaskRecorder
+                obj.taskRecorder.run(obj.timeNow);
+            end
          
-            obj.taskControl.run(obj.timeNow);
+
             
             
             elapseTime = obj.timeNow - obj.timeStart;
@@ -102,15 +148,38 @@ classdef pendubot_controller
             end
         end
         
+        function obj = setTaskRecorder(obj, isTaskRecorder)
+            obj.isTaskRecorder = isTaskRecorder;
+            if(isTaskRecorder)
+                obj.taskRecorder =  mx_task(@()obj.task_recorder, obj.dT_recorder);
+            end
+   
+        end
+        
+        function obj = setTaskPID(obj, isTaskPID)
+            obj.isTaskPID = isTaskPID
+            obj.taskPID = mx_task(@()obj.task_PID, obj.dT_PID);
+        end
+        
         
         function set_measureOrigin(obj)
             global absPos1 absPos2 origin_absPos1 origin_absPos2
+            
+            % iterate steps to ensure the measurement is steady
             for i = 1:5
                 obj.firstMeasure();
             end
             origin_absPos1 = absPos1;
             origin_absPos2 = absPos2;
         end
+        
+        
+        function set_zeroTor(obj)
+            global desTor1
+            desTor1 = 0;
+        end
+        
+        
         
    
         
@@ -168,7 +237,8 @@ classdef pendubot_controller
 
         
         function obj = measurement(obj)
-            global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil
+            global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 
+            global origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil actTor1 RecordCell elapseTime 
             prevPos1 = pos1;
             prevPos2 = pos2;
             prev_q1 = q1;
@@ -200,28 +270,58 @@ classdef pendubot_controller
             relPos1 = absPos1 - origin_absPos1;
             relPos2 = absPos2 - origin_absPos2;
             
+            % position
             q1 = (relPos1 +180) / 180 * pi;
             q2 = (q1 + relPos2) / 180 * pi;
             
+            % velociy
             dq1 = (q1 - prev_q1) / obj.dT_control;
             dq2 = (q2 - prev_q2) / obj.dT_control;
             
+            % filtered velocity
             dq1_fil = obj.dq1_filRatio *  dq1_fil + (1-obj.dq1_filRatio) * dq1;
             dq2_fil = obj.dq2_filRatio *  dq2_fil + (1-obj.dq2_filRatio) * dq2;
+            
+            % measure torque
+            actTor1 = obj.motor1.sensors.current_motor;
+            
+
+
         end
+        
+       
         
 
         
         function send_torque(obj)
             global desTor1                  
-            if abs(desTor1) >= obj.maxTor
-                obj.motor1.send_current(sign(desTor1) * obj.maxTor);
+            if abs(desTor1) >= obj.maxTor1
+                obj.motor1.send_current(sign(desTor1) * obj.maxTor1);
             else
                 obj.motor1.send_current(desTor1); % sends current command
             end
    
         end
   
+        
+        function task_recorder(obj)
+            % record data
+            global q1 q2 dq1_fil dq2_fil actTor1 elapseTime RecordCell desTor1
+            if ~isempty(q1) && ~isempty(q2) && ~isempty(dq1_fil) && ~isempty(dq2_fil) && ~isempty(desTor1) && ~isempty(elapseTime) 
+                RecordCell{1} = [RecordCell{1}, q1];
+                RecordCell{2} = [RecordCell{2}, q2];
+                RecordCell{3} = [RecordCell{3}, dq1_fil];
+                RecordCell{4} = [RecordCell{4}, dq2_fil];
+                RecordCell{5} = [RecordCell{5}, desTor1];
+                RecordCell{6} = [RecordCell{6}, elapseTime];
+            end
+            
+            if obj.maxRecordBuffer < size(RecordCell{1},2)
+                for i = 1:6
+                    RecordCell{i} = RecordCell{i}(end-obj.maxRecordBuffer);
+                end
+            end
+        end
             
         function task_printer(obj)
              global relPos1 relPos2 absPos1 absPos2  q1 q2 
@@ -232,24 +332,17 @@ classdef pendubot_controller
         end
         
         function task_plotter(obj)
-            global q1 q2 dq1_fil dq2_fil plot_Cell elapseTime isInitPlot
+            global RecordCell 
             
-            if ~isempty(q1) && ~isempty(q2) && ~isempty(dq1_fil) && ~isempty(dq2_fil) && ~isempty(elapseTime) 
-                plot_Cell{1} = [plot_Cell{1}, q1];
-                plot_Cell{2} = [plot_Cell{2}, q2];
-                plot_Cell{3} = [plot_Cell{3}, dq1_fil];
-                plot_Cell{4} = [plot_Cell{4}, dq2_fil];
-                plot_Cell{5} = [plot_Cell{5}, elapseTime];
-                legendList = ['q1', 'q2', 'Filtered dq1', 'Filtered dq2'];
-
+            if ~isempty(RecordCell{1})
                 figure(obj.FigID);
 
-                for i = 1:4
-                    ax = subplot(2,2,i);
-                    if size(plot_Cell{5},2)<=(obj.fixPlotWindowTime/obj.dT_plotter)
-                        plot(ax, plot_Cell{5},plot_Cell{i});
+                for i = 1:5
+                    ax = subplot(3,2,i);
+                    if size(RecordCell{end},2)<=(obj.fixPlotWindowTime/obj.dT_recorder)
+                        plot(ax, RecordCell{end}, RecordCell{i});
                     else
-                        plot(ax, plot_Cell{5}(end - obj.fixPlotWindowTime/obj.dT_plotter:end), plot_Cell{i}(end - obj.fixPlotWindowTime/obj.dT_plotter:end));
+                        plot(ax, RecordCell{end}(end - obj.fixPlotWindowTime/obj.dT_plotter:end), RecordCell{i}(end - obj.fixPlotWindowTime/obj.dT_recorder : end));
                     end
 %                   legend(legendList(i))
 %                     if isInitPlot
@@ -266,6 +359,13 @@ classdef pendubot_controller
         function obj = task_control(obj)
             obj.measurement();
             obj.send_torque();
+            
+        end
+        
+        function task_PID(obj)
+            global q1 dq1_fil des_q1 des_dq1_fil desTor1
+            tor1 = (des_q1 - q1) * obj.PID_p + (des_dq1_fil - dq1_fil)* obj.PID_d;
+            desTor1 = sign(tor1) * min(abs(tor1), obj.maxTor1);
         end
     
         
