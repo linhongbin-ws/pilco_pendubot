@@ -32,19 +32,31 @@ classdef pendubot_controller
         
         
         % mearsure param
-        gearRatio1 = 1
+        gearRatio1 = 1/5
         gearRatio2 = 1
-        dq1_filRatio = 0.9
-        dq2_filRatio = 0.9
-
+        q1_filRatio = 0.01
+        q2_filRatio = 0.2
+        dq1_filRatio = 0.3
+        dq2_filRatio = 0.3
+        
+        isSetOriginMeasure = false
         
         % control param
-        PID_p = 0.5
-        PID_d = 0
+        PID_p1 = 0.5
+        PID_d1 = 0
+        PID_p2 = 0.4
+        PID_d2 = 0
+        
         maxTor1 = 1
+        maxTor2 = 1
+        
+        maxVel1 = 10
+        maxVel2 = 10
+
+        
+        
         
         % record param
-        legendList = ['q1', 'q2', 'Filtered dq1', 'Filtered dq2', 'tau'];
         maxRecordBuffer = 10000
         
     end
@@ -57,16 +69,22 @@ classdef pendubot_controller
             
             obj.timeStart = mx_sleep(0);
             obj.timeNow = obj.timeStart;
-            
-            global RecordCell origin_absPos1 origin_absPos2 isInitPlot desTor1 
+             
+            global RecordCell origin_absPos1 origin_absPos2 isInitPlot desTor1 desTor2  isVelExceed1 isVelExceed2 safeTorTrip
 
-            RecordCell = cell(1, 6);
+            isVelExceed1 = false;
+            isVelExceed2 = false;
+            RecordCell = cell(1, 7);
             origin_absPos1 = 0;
             origin_absPos2 = 0;
             isInitPlot = true;
             desTor1 = 0;
+            desTor2 = 0; 
+            safeTorTrip = true;
         end
         function obj = start(obj)
+            
+            obj.turnOnSafeTorTrip();
             
             % basic task that must run
             obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control); 
@@ -100,9 +118,9 @@ classdef pendubot_controller
       
         
         function stop(obj)
-            obj.set_zeroTor()
-            obj.motor1.close()
-            obj.motor2.close()
+            obj.set_zeroTor();
+            obj.motor1.close();
+            obj.motor2.close();
         end
         
         function obj = run(obj)
@@ -157,88 +175,60 @@ classdef pendubot_controller
         end
         
         function obj = setTaskPID(obj, isTaskPID)
-            obj.isTaskPID = isTaskPID
+            obj.isTaskPID = isTaskPID;
             obj.taskPID = mx_task(@()obj.task_PID, obj.dT_PID);
         end
         
         
         function set_measureOrigin(obj)
-            global absPos1 absPos2 origin_absPos1 origin_absPos2
-            
-            % iterate steps to ensure the measurement is steady
-            for i = 1:5
-                obj.firstMeasure();
-            end
-            origin_absPos1 = absPos1;
-            origin_absPos2 = absPos2;
-        end
-        
-        
-        function set_zeroTor(obj)
-            global desTor1
-            desTor1 = 0;
-        end
-        
-        
-        
-   
-        
-        function obj = firstMeasure(obj)
-            global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil
+            global  prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2   origin_absPos1 origin_absPos2  dq1_fil dq2_fil          
+            global prev_q1 q1 prev_q2 q2 q1_fil q2_fil
+
             absC1 = 0;
             absC2 = 0;
             prevPos1 = 0;
             prevPos2 = 0;
             pos1 = 0;
             pos2 = 0;
-            prevPos1 = pos1;
-            prevPos2 = pos2;
-            prev_q1 = q1;
-            prev_q2 = q2;
             dq1_fil = 0;
             dq2_fil  = 0;
+            prev_q1 = 0;
+            q1 = 0;;
+            prev_q2 = 0;
+            q2=0;
             
-            angThres = 190;
+            obj.isSetOriginMeasure = true;
+ 
+            
+            % iterate steps to ensure the measurement is steady
+            for i = 1:5
+                obj.measurement();
+            end
 
-            
-            obj.motor1.get_sensors();
-            obj.motor2.get_sensors();
-            pos1 = obj.motor1.sensors.pid_pos;
-            pos2 = obj.motor2.sensors.pid_pos;
-            
-            if abs(pos1-prevPos1)>angThres && pos1-prevPos1<0
-                absC1 = absC1 +1;
-            elseif abs(pos1-prevPos1)>angThres && pos1-prevPos1>0
-                absC1 = absC1 -1;
+            origin_absPos1 = absPos1;
+            origin_absPos2 = absPos2;
+     
+            % update some previous variable like prevPos1
+            for i = 1:10
+                obj.measurement();
             end
             
-            if abs(pos2-prevPos2)>angThres && pos2-prevPos2<0
-                absC2 = absC2 +1;
-            elseif abs(pos2-prevPos2)>angThres && pos2-prevPos2>0
-                absC2 = absC2 -1;
-            end
-            
-            absPos1 = -1 * (pos1 + absC1*360) * obj.gearRatio1;
-            absPos2 = -1 * (pos2 + absC2*360) * obj.gearRatio2;
-            
-            relPos1 = absPos1 - origin_absPos1;
-            relPos2 = absPos2 - origin_absPos2;
-            
-            q1 = (relPos1 +180) / 180 * pi;
-            q2 = (q1 + relPos2) / 180 * pi;
-            
-            dq1 = (q1 - prev_q1) / obj.dT_control;
-            dq2 = (q2 - prev_q2) / obj.dT_control;
-            
-            dq1_fil = obj.dq1_filRatio *  dq1_fil + (1-obj.dq1_filRatio) * dq1;
-            dq2_fil = obj.dq2_filRatio *  dq2_fil + (1-obj.dq2_filRatio) * dq2;
+            obj.isSetOriginMeasure = false;
         end
         
+        
+        function set_zeroTor(obj)
+            global desTor1 desTor2
+            desTor1 = 0;
+            desTor2 = 0;
+        end
+        
+      
 
         
         function obj = measurement(obj)
             global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 
-            global origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil actTor1 RecordCell elapseTime 
+            global origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil q1_fil q2_fil
             prevPos1 = pos1;
             prevPos2 = pos2;
             prev_q1 = q1;
@@ -272,20 +262,25 @@ classdef pendubot_controller
             
             % position
             q1 = (relPos1 +180) / 180 * pi;
-            q2 = (q1 + relPos2) / 180 * pi;
-            
+            q2 = q1 + (relPos2 / 180 * pi);
             % velociy
             dq1 = (q1 - prev_q1) / obj.dT_control;
             dq2 = (q2 - prev_q2) / obj.dT_control;
             
-            % filtered velocity
-            dq1_fil = obj.dq1_filRatio *  dq1_fil + (1-obj.dq1_filRatio) * dq1;
-            dq2_fil = obj.dq2_filRatio *  dq2_fil + (1-obj.dq2_filRatio) * dq2;
+            if ~obj.isSetOriginMeasure
+                % filtered velocity
+                q1_fil = obj.q1_filRatio *  q1_fil + (1-obj.q1_filRatio) * q1;
+                q2_fil = obj.q2_filRatio *  q2_fil + (1-obj.q2_filRatio) * q2;
+                % filtered velocity
+                dq1_fil = obj.dq1_filRatio *  dq1_fil + (1-obj.dq1_filRatio) * dq1;
+                dq2_fil = obj.dq2_filRatio *  dq2_fil + (1-obj.dq2_filRatio) * dq2;
+            else  
+                q1_fil =  q1;
+                q2_fil =  q2;
+                dq1_fil = dq1;
+                dq2_fil = dq2;           
+            end
             
-            % measure torque
-            actTor1 = obj.motor1.sensors.current_motor;
-            
-
 
         end
         
@@ -294,11 +289,26 @@ classdef pendubot_controller
 
         
         function send_torque(obj)
-            global desTor1                  
-            if abs(desTor1) >= obj.maxTor1
-                obj.motor1.send_current(sign(desTor1) * obj.maxTor1);
+            global desTor1 desTor2 safeTorTrip isVelExceed1 isVelExceed2
+            
+            if isVelExceed1 || isVelExceed2
+                safeTorTrip = false;
+            end
+            
+            if safeTorTrip
+                if abs(desTor1) >= obj.maxTor1
+                    obj.motor1.send_current(sign(desTor1) * obj.maxTor1);
+                else
+                    obj.motor1.send_current(desTor1); % sends current command
+                end
+                if abs(desTor2) >= obj.maxTor2
+                    obj.motor2.send_current(sign(desTor2) * obj.maxTor2);
+                else
+                    obj.motor2.send_current(desTor2); % sends current command
+                end
             else
-                obj.motor1.send_current(desTor1); % sends current command
+                obj.motor1.send_current(0);
+                obj.motor2.send_current(0);
             end
    
         end
@@ -306,29 +316,27 @@ classdef pendubot_controller
         
         function task_recorder(obj)
             % record data
-            global q1 q2 dq1_fil dq2_fil actTor1 elapseTime RecordCell desTor1
-            if ~isempty(q1) && ~isempty(q2) && ~isempty(dq1_fil) && ~isempty(dq2_fil) && ~isempty(desTor1) && ~isempty(elapseTime) 
-                RecordCell{1} = [RecordCell{1}, q1];
-                RecordCell{2} = [RecordCell{2}, q2];
+            global q1_fil q2_fil dq1_fil dq2_fil elapseTime RecordCell desTor1 desTor2
+            if ~isempty(q1_fil) && ~isempty(q2_fil) && ~isempty(dq1_fil) && ~isempty(dq2_fil) && ~isempty(desTor1) &&  ~isempty(desTor2) && ~isempty(elapseTime) 
+                RecordCell{1} = [RecordCell{1}, q1_fil];
+                RecordCell{2} = [RecordCell{2}, q2_fil];
                 RecordCell{3} = [RecordCell{3}, dq1_fil];
                 RecordCell{4} = [RecordCell{4}, dq2_fil];
                 RecordCell{5} = [RecordCell{5}, desTor1];
-                RecordCell{6} = [RecordCell{6}, elapseTime];
+                RecordCell{6} = [RecordCell{6}, desTor2];
+                RecordCell{7} = [RecordCell{7}, elapseTime];
             end
             
             if obj.maxRecordBuffer < size(RecordCell{1},2)
-                for i = 1:6
+                for i = 1:7
                     RecordCell{i} = RecordCell{i}(end-obj.maxRecordBuffer);
                 end
             end
         end
             
         function task_printer(obj)
-             global relPos1 relPos2 absPos1 absPos2  q1 q2 
-%             fprintf("pos1: %.4f deg \t pos2: %.4f deg\n", absPos1, absPos2); 
-            
-%             fprintf("pos1: %.4f deg \t pos2: %.4f deg\n", relPos1, relPos2);
-            fprintf("pos1: %.4f deg \t pos2: %.4f deg\n", q1, q2);
+             global q1 q2 dq1_fil dq2_fil
+            fprintf("q1: %.2f rad \t q2: %.2f rad \t dq1_fil: %.2f rad\\s \t dq2_fil: %.2f rad\\s \n", q1, q2, dq1_fil, dq2_fil);
         end
         
         function task_plotter(obj)
@@ -337,12 +345,12 @@ classdef pendubot_controller
             if ~isempty(RecordCell{1})
                 figure(obj.FigID);
 
-                for i = 1:5
+                for i = 1:6
                     ax = subplot(3,2,i);
                     if size(RecordCell{end},2)<=(obj.fixPlotWindowTime/obj.dT_recorder)
                         plot(ax, RecordCell{end}, RecordCell{i});
                     else
-                        plot(ax, RecordCell{end}(end - obj.fixPlotWindowTime/obj.dT_plotter:end), RecordCell{i}(end - obj.fixPlotWindowTime/obj.dT_recorder : end));
+                        plot(ax, RecordCell{end}(end - obj.fixPlotWindowTime/obj.dT_recorder:end), RecordCell{i}(end - obj.fixPlotWindowTime/obj.dT_recorder : end));
                     end
 %                   legend(legendList(i))
 %                     if isInitPlot
@@ -358,14 +366,18 @@ classdef pendubot_controller
         
         function obj = task_control(obj)
             obj.measurement();
+            obj.updateSafeVelocity();
             obj.send_torque();
             
         end
         
         function task_PID(obj)
-            global q1 dq1_fil des_q1 des_dq1_fil desTor1
-            tor1 = (des_q1 - q1) * obj.PID_p + (des_dq1_fil - dq1_fil)* obj.PID_d;
+            global q1_fil dq1_fil q2_fil dq2_fil des_q1 des_dq1_fil des_q2 des_dq2_fil desTor1 desTor2
+            tor1 = (des_q1 - q1_fil) * obj.PID_p1 + (des_dq1_fil - dq1_fil)* obj.PID_d1;
             desTor1 = sign(tor1) * min(abs(tor1), obj.maxTor1);
+            
+            tor2 = (des_q2 - q2_fil) * obj.PID_p2 + (des_dq2_fil - dq2_fil)* obj.PID_d2;
+            desTor2 = sign(tor2) * min(abs(tor2), obj.maxTor2);
         end
     
         
@@ -374,6 +386,25 @@ classdef pendubot_controller
             obj.motor2.delete();
         end
         
+        function turnOnSafeTorTrip(obj)
+            global safeTorTrip
+            safeTorTrip = true;
+        end
+        
+        function updateSafeVelocity(obj)
+            global dq1_fil dq2_fil isVelExceed1 isVelExceed2
+            if dq1_fil >= obj.maxVel1 
+                isVelExceed1 = true;
+            else
+                isVelExceed1 = false;
+            end
+            
+            if dq2_fil >= obj.maxVel2
+                isVelExceed2 = true;
+            else
+                isVelExceed2 = false;
+            end
+        end
  
     end
 end
