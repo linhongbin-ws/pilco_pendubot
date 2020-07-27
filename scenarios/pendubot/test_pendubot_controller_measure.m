@@ -2,9 +2,9 @@
 addpath(genpath('/home/ben/code/dw_foc'))
 clear all; clc;
 controller = pendubot_controller();
-controller = controller.setTaskPlotter(false);
-controller = controller.setTaskPrinter(false);
-duration = 10;
+controller = controller.setTaskPlotter(true);
+controller = controller.setTaskPrinter(true);
+duration = 30;
 controller = controller.start();
 tic
 while (controller.timeNow-controller.timeStart<=duration)

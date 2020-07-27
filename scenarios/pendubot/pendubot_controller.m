@@ -7,11 +7,11 @@ classdef pendubot_controller
         timeNow
         
         %task param
-        dT_control = 0.01
-        dT_print = 0.1
+        dT_control = 0.002
+        dT_print = 0.02
         dT_plotter = 0.1
         dT_PID = 0.01
-        dT_recorder = 0.01
+        dT_recorder = 0.02
         
         
         taskControl
@@ -36,8 +36,8 @@ classdef pendubot_controller
         gearRatio2 = 1
         q1_filRatio = 0.01
         q2_filRatio = 0.2
-        dq1_filRatio = 0.3
-        dq2_filRatio = 0.3
+        dq1_filRatio = 0
+        dq2_filRatio = 0
         
         isSetOriginMeasure = false
         
@@ -182,7 +182,7 @@ classdef pendubot_controller
         
         function set_measureOrigin(obj)
             global  prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2   origin_absPos1 origin_absPos2  dq1_fil dq2_fil          
-            global prev_q1 q1 prev_q2 q2 q1_fil q2_fil
+            global prev_q1 q1 prev_q2 q2 q1_fil q2_fil prev_mTime mTime
 
             absC1 = 0;
             absC2 = 0;
@@ -196,7 +196,8 @@ classdef pendubot_controller
             q1 = 0;;
             prev_q2 = 0;
             q2=0;
-            
+            prev_mTime = mx_sleep(0);
+            mTime = prev_mTime + obj.dT_control;
             obj.isSetOriginMeasure = true;
  
             
@@ -228,17 +229,19 @@ classdef pendubot_controller
         
         function obj = measurement(obj)
             global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 
-            global origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil q1_fil q2_fil
+            global origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil q1_fil q2_fil dq1 dq2 prev_mTime mTime
             prevPos1 = pos1;
             prevPos2 = pos2;
             prev_q1 = q1;
             prev_q2 = q2;
+            prev_mTime = mTime;
             
             angThres = 190;
 
             
             obj.motor1.get_sensors();
             obj.motor2.get_sensors();
+            mTime = mx_sleep(0);
             pos1 = obj.motor1.sensors.pid_pos;
             pos2 = obj.motor2.sensors.pid_pos;
             
@@ -264,8 +267,8 @@ classdef pendubot_controller
             q1 = (relPos1 +180) / 180 * pi;
             q2 = q1 + (relPos2 / 180 * pi);
             % velociy
-            dq1 = (q1 - prev_q1) / obj.dT_control;
-            dq2 = (q2 - prev_q2) / obj.dT_control;
+            dq1 = (q1 - prev_q1) / (mTime-prev_mTime);
+            dq2 = (q2 - prev_q2) / (mTime-prev_mTime);
             
             if ~obj.isSetOriginMeasure
                 % filtered velocity
@@ -316,7 +319,7 @@ classdef pendubot_controller
         
         function task_recorder(obj)
             % record data
-            global q1_fil q2_fil dq1_fil dq2_fil elapseTime RecordCell desTor1 desTor2
+            global q1 q2 dq1_fil dq2_fil elapseTime RecordCell desTor1 desTor2 q1_fil q2_fil
             if ~isempty(q1_fil) && ~isempty(q2_fil) && ~isempty(dq1_fil) && ~isempty(dq2_fil) && ~isempty(desTor1) &&  ~isempty(desTor2) && ~isempty(elapseTime) 
                 RecordCell{1} = [RecordCell{1}, q1_fil];
                 RecordCell{2} = [RecordCell{2}, q2_fil];
@@ -372,11 +375,11 @@ classdef pendubot_controller
         end
         
         function task_PID(obj)
-            global q1_fil dq1_fil q2_fil dq2_fil des_q1 des_dq1_fil des_q2 des_dq2_fil desTor1 desTor2
-            tor1 = (des_q1 - q1_fil) * obj.PID_p1 + (des_dq1_fil - dq1_fil)* obj.PID_d1;
+            global q1_fil dq1_fil q2_fil dq2_fil des_q1 des_dq1_fil des_q2 des_dq2_fil desTor1 desTor2 q1 q2 dq1 dq2
+            tor1 = (des_q1 - q1) * obj.PID_p1 + (des_dq1_fil - dq1)* obj.PID_d1;
             desTor1 = sign(tor1) * min(abs(tor1), obj.maxTor1);
             
-            tor2 = (des_q2 - q2_fil) * obj.PID_p2 + (des_dq2_fil - dq2_fil)* obj.PID_d2;
+            tor2 = (des_q2 - q2) * obj.PID_p2 + (des_dq2_fil - dq2)* obj.PID_d2;
             desTor2 = sign(tor2) * min(abs(tor2), obj.maxTor2);
         end
     

@@ -7,12 +7,12 @@ controller = controller.setTaskPlotter(true);
 controller = controller.setTaskPrinter(false);
 controller = controller.setTaskPID(true);
 duration = 20;
-controller.maxTor1 = 0.6;
-controller.maxTor2 = 0.6;
+controller.maxTor1 = 0.4;
+controller.maxTor2 = 0.4;
 
-controller.PID_p1 = 1;
+controller.PID_p1 = 0.1;
 controller.PID_d1 = 0;
-controller.PID_p2 = 1;
+controller.PID_p2 = 0.1;
 controller.PID_d2 = 0;
 
 controller.set_zeroTor();
