@@ -194,9 +194,11 @@ classdef pendubot_controller
 
             origin_absPos1 = absPos1;
             origin_absPos2 = absPos2;
-     
+            dq1_fil = 0;
+            dq2_fil = 0;
+      
             % update some previous variable like prevPos1
-            for i = 1:10
+            for i = 1:100
                 obj.measurement();
             end
             
@@ -268,8 +270,8 @@ classdef pendubot_controller
             else  
                 q1_fil =  q1;
                 q2_fil =  q2;
-                dq1_fil = dq1;
-                dq2_fil = dq2;           
+                dq1_fil = 0;
+                dq2_fil = 0;           
             end
             
 
@@ -365,10 +367,10 @@ classdef pendubot_controller
         
         function task_PID(obj)
             global q1_fil dq1_fil q2_fil dq2_fil des_q1 des_dq1_fil des_q2 des_dq2_fil desTor1 desTor2 q1 q2 dq1 dq2
-            tor1 = (des_q1 - q1) * obj.PID_p1 + (des_dq1_fil - dq1)* obj.PID_d1;
+            tor1 = (des_q1 - q1_fil) * obj.PID_p1 + (des_dq1_fil - dq1)* obj.PID_d1;
             desTor1 = sign(tor1) * min(abs(tor1), obj.maxTor1);
             
-            tor2 = (des_q2 - q2) * obj.PID_p2 + (des_dq2_fil - dq2)* obj.PID_d2;
+            tor2 = (des_q2 - q2_fil) * obj.PID_p2 + (des_dq2_fil - dq2)* obj.PID_d2;
             desTor2 = sign(tor2) * min(abs(tor2), obj.maxTor2);
         end
     
