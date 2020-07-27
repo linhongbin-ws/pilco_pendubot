@@ -4,7 +4,7 @@ clear all; clc;
 controller = pendubot_controller();
 controller = controller.setTaskPlotter(true);
 controller = controller.setTaskPrinter(true);
-duration = 30;
+duration = 20;
 controller = controller.start();
 tic
 while (controller.timeNow-controller.timeStart<=duration)
