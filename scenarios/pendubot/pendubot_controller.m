@@ -34,8 +34,8 @@ classdef pendubot_controller
         gearRatio2 = 1
         q1_filRatio = 0
         q2_filRatio = 0
-        dq1_filRatio = 0.99
-        dq2_filRatio = 0.99
+        dq1_filRatio = 0.9
+        dq2_filRatio = 0.9
         
         isSetOriginMeasure = false
         
@@ -255,7 +255,7 @@ classdef pendubot_controller
             q2 = q1 + (relPos2 / 180 * pi);
             % velociy
             dt = obj.dT_control;
-%             dt = (mTime-prev_mTime)
+%            dt = (mTime-prev_mTime);
             dq1 = (q1 - prev_q1) / dt;
             dq2 = (q2 - prev_q2) / dt;
             
