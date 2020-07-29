@@ -9,7 +9,7 @@ classdef pendubot_controller
         %task param
         dT_control = 0.002
         dT_print = 0.02
-        dT_plotter = 0.1
+        dT_plotter = 0.2
         dT_PID = 0.01
         
         
@@ -93,6 +93,7 @@ classdef pendubot_controller
             end
             if obj.isTaskPlotter
                 obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
+                figure(obj.FigID)
             end
             if obj.isTaskPID
                 obj.taskPID =  mx_task(@()obj.task_PID, obj.dT_PID);
@@ -186,7 +187,6 @@ classdef pendubot_controller
             mTime = prev_mTime + obj.dT_control;
             obj.isSetOriginMeasure = true;
  
-            
             % iterate steps to ensure the measurement is steady
             for i = 1:5
                 obj.measurement();
@@ -226,7 +226,6 @@ classdef pendubot_controller
             
             angThres = 190;
 
-            
             obj.motor1.get_sensors();
             obj.motor2.get_sensors();
             mTime = mx_sleep(0);
@@ -328,8 +327,8 @@ classdef pendubot_controller
         end
             
         function task_printer(obj)
-             global q1 q2 dq1_fil dq2_fil
-            fprintf("q1: %.2f rad \t q2: %.2f rad \t dq1_fil: %.2f rad\\s \t dq2_fil: %.2f rad\\s \n", q1, q2, dq1_fil, dq2_fil);
+             global q1 q2 dq1_fil dq2_fil desTor1 desTor2
+            fprintf("q1: %.2f rad \t q2: %.2f rad \t dq1_fil: %.2f rad\\s \t dq2_fil: %.2f rad\\s \t Tor1: %.2f \t Tor2: %.2f\n", q1, q2, dq1_fil, dq2_fil, desTor1, desTor2);
         end
         
         function task_plotter(obj)
